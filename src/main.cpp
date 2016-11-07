@@ -12,26 +12,24 @@ char influxdb_line [INFLUXDB_LINE_MAX_SIZE];
 
 void module_panic(String message) {
     Serial.println("PANIC: "+message);
-    delay(500);
+    delay(STANDART_SHORT_DELAY);
     reboot_module();
 }
 
 measures do_measures() {
     measures result;
 
-    result.dht22_humidity = dht.readHumidity();
-    result.dht22_temperature = dht.readTemperature();
+    result.dht22_humidity = dht.readHumidity(); yield();
+    result.dht22_temperature = dht.readTemperature(); yield();
     if(isnan(result.dht22_humidity)||isnan(result.dht22_temperature))
         module_panic("Error reading DHT22");
-    delay(500);
 
-    result.bmp180_pressure = bmp.readPressure();
-    result.bmp180_temperature = bmp.readTemperature();
+    result.bmp180_pressure = bmp.readPressure(); yield();
+    result.bmp180_temperature = bmp.readTemperature(); yield();
     if(isnan(result.bmp180_temperature))
         module_panic("Error reading BMP180");
-    delay(500);
 
-    result.rssi = WiFi.RSSI();
+    result.rssi = WiFi.RSSI(); yield();
 
     return result;
 }
@@ -54,9 +52,9 @@ char* build_influxdb_line(measures m) {
     char dht22_humidity[10];
     char bmp180_temperature[10];
 
-    dtostrf(m.dht22_temperature,5,2,dht22_temperature);
-    dtostrf(m.dht22_humidity,5,2,dht22_humidity);
-    dtostrf(m.bmp180_temperature,5,2,bmp180_temperature);
+    dtostrf(m.dht22_temperature,5,2,dht22_temperature); yield();
+    dtostrf(m.dht22_humidity,5,2,dht22_humidity); yield();
+    dtostrf(m.bmp180_temperature,5,2,bmp180_temperature); yield();
 
     int length = snprintf(influxdb_line,
         INFLUXDB_LINE_MAX_SIZE,
@@ -67,7 +65,7 @@ char* build_influxdb_line(measures m) {
         m.bmp180_pressure,
         bmp180_temperature,
         m.rssi
-    );
+    ); yield();
 
     return influxdb_line;
 }
@@ -88,22 +86,21 @@ void assert(int err, String name) {
 
 void reboot_module() {
     Serial.println("Rebooting module...");
+    delay(STANDART_SHORT_DELAY);
     ESP.restart();
 }
 
 void connect_wifi() {
     WiFiMulti.addAP(ssid, wpa_key);
 
-    Serial.print("\n");
-    Serial.print("\n");
     Serial.print("Wait for WiFi...\n");
 
     int attempt = 0;
     while(WiFiMulti.run() != WL_CONNECTED) {
         Serial.print(".");
-        delay(500);
+        delay(STANDART_SHORT_DELAY);
         attempt++;
-        if (attempt > 120)
+        if (attempt > WIFI_MAX_ATTEMPTS)
             module_panic("Wifi connection failed");
     }
 
@@ -115,28 +112,31 @@ void connect_wifi() {
 
 void setup() {
     Serial.begin(115200);
-    delay(10);
+    delay(STANDART_SHORT_DELAY);
 
-    connect_wifi();
-    delay(500);
+    connect_wifi(); yield();
 
-    dht.begin();
-    delay(500);
+    //Init DHT22
+    dht.begin(); yield();
 
     //Init I2C
-    Wire.begin(2,0);
-    delay(500);
-    assert(bmp.begin(),"Initialize BMP180");
-    delay(500);
+    Wire.begin(2,0); yield();
+    delay(STANDART_SHORT_DELAY);
+
+    //Init BMP180
+    assert(bmp.begin(),"Initialize BMP180"); yield();
+
+    //After-setup delay
+    delay(STANDART_SHORT_DELAY);
 }
 
-
 void loop() {
-    measures m = do_measures();
-    delay(500);
+    measures m = do_measures(); yield();
+
     print_measures(m);
-    report_to_influxdb(m);
-    delay(500);
+    delay(STANDART_SHORT_DELAY);
+
+    report_to_influxdb(m); yield();
 
     loop_num++;
     if (loop_num >= REBOOT_LOOPS)

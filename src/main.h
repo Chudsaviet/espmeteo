@@ -14,6 +14,8 @@
 #define DHTPIN 5
 #define DHTTYPE DHT22
 #define INFLUXDB_LINE_MAX_SIZE 500
+#define STANDART_SHORT_DELAY 500 //ms
+#define WIFI_MAX_ATTEMPTS 100
 
 typedef struct  {
     float dht22_humidity;
