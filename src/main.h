@@ -16,6 +16,8 @@
 #define INFLUXDB_LINE_MAX_SIZE 500
 #define STANDART_SHORT_DELAY 500 //ms
 #define WIFI_MAX_ATTEMPTS 100
+#define FLOAT_MAX_CHARS 64
+#define INT_MAX_CHARS 64
 
 typedef struct  {
     float dht22_humidity;
@@ -23,17 +25,18 @@ typedef struct  {
     int   bmp180_pressure;
     float bmp180_temperature;
     int rssi;
-} measures;
+} Measures;
 
-void module_panic(String message);
+void module_panic(const char* message);
 void reboot_module();
-void assert(int err, String name);
-measures do_measures();
-void print_measures(measures m);
-char* build_influxdb_line(measures m);
-bool report_to_influxdb(measures m);
+void assert(int err, const char* name);
+Measures do_measures();
+void print_measures(Measures m);
+char* build_influxdb_line(Measures m);
+void report_to_influxdb(Measures m);
 void connect_wifi();
 void setup();
 void loop();
+void send_to_influxdb(char* line);
 
 #endif
