@@ -10,7 +10,8 @@
 
 /* Loop delay should not be less than 2000 ms due to DHT22 restrictions */
 #define LOOP_DELAY_MS 30000
-#define REBOOT_LOOPS 1000
+#define REBOOT_LOOPS 500
+#define RE_RESOLVE_LOOPS 20
 #define DHTPIN 5
 #define DHTTYPE DHT22
 #define INFLUXDB_LINE_MAX_SIZE 500
@@ -18,6 +19,7 @@
 #define WIFI_MAX_ATTEMPTS 100
 #define FLOAT_MAX_CHARS 64
 #define INT_MAX_CHARS 64
+#define DNS_LOOKUP_MAX_RETRIES 5
 
 typedef struct  {
     float dht22_humidity;
@@ -37,6 +39,8 @@ void report_to_influxdb(Measures m);
 void connect_wifi();
 void setup();
 void loop();
-void send_to_influxdb(char* line);
+void send_to_influxdb(char* line, char* action, int port);
+void send_to_influxdb_sensors(char* line);
+void send_to_influxdb_heartbeat(char* line);
 
 #endif

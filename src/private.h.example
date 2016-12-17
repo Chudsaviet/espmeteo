@@ -1,9 +1,12 @@
 #ifndef PRIVATE_H
 #define PRIVATE_H
 
+#include <ESP8266WiFi.h>
+
 const char* ssid    = "<SSID>";
 const char* wpa_key = "<WPA_KEY>";
-const IPAddress influxdb_ip(<IP LIKE 0,0,0,0>);
-const unsigned influxdb_port = <PORT>;
+const char* influxdb_host = "<hostname>";
+const unsigned influxdb_sensors_port = <port>;
+const unsigned influxdb_heartbeat_port = <port>;
 
 #endif

@@ -4,6 +4,7 @@
 
 ESP8266WiFiMulti WiFiMulti;
 WiFiUDP Udp;
+IPAddress influxdb_ip = IPAddress(0,0,0,0);
 DHT dht(DHTPIN, DHTTYPE, 11);
 Adafruit_BMP085 bmp;
 uint loop_num = 0;
@@ -17,6 +18,32 @@ void module_panic(const char* message) {
     Serial.println(message);
     delay(STANDART_SHORT_DELAY*10);
     reboot_module();
+}
+
+void resolve_influxdb_address()
+{
+    Serial.println("InfluxDB IP address lookup...");
+    influxdb_ip = IPAddress(0,0,0,0);
+
+    int retry = 0;
+    while(!WiFi.hostByName(influxdb_host, influxdb_ip))
+    {
+        delay(STANDART_SHORT_DELAY*2);
+        retry++;
+        Serial.println("Lookup failed, retry...");
+        if(retry >= DNS_LOOKUP_MAX_RETRIES)
+            break;
+    }
+
+    if(retry >= DNS_LOOKUP_MAX_RETRIES)
+    {
+        module_panic("Influxdb DNS lookup failed");
+    }
+    else
+    {
+        Serial.print("InfluxDB IP address: ");
+        Serial.println(influxdb_ip);
+    }
 }
 
 Measures do_measures() {
@@ -121,7 +148,7 @@ void report_to_influxdb(Measures m) {
       temperature,
       m.dht22_temperature);
     yield();
-    send_to_influxdb(influxdb_line); yield();
+    send_to_influxdb_sensors(influxdb_line); yield();
 
     //report DHT22 humidity
     build_influxdb_line(
@@ -131,7 +158,7 @@ void report_to_influxdb(Measures m) {
       humidity,
       m.dht22_humidity);
     yield();
-    send_to_influxdb(influxdb_line); yield();
+    send_to_influxdb_sensors(influxdb_line); yield();
 
     //report BMP180 temperature
     build_influxdb_line(
@@ -141,7 +168,7 @@ void report_to_influxdb(Measures m) {
       temperature,
       m.bmp180_temperature);
     yield();
-    send_to_influxdb(influxdb_line); yield();
+    send_to_influxdb_sensors(influxdb_line); yield();
 
     //report BMP180 pressure
     build_influxdb_line(
@@ -151,7 +178,7 @@ void report_to_influxdb(Measures m) {
       pressure,
       m.bmp180_pressure);
     yield();
-    send_to_influxdb(influxdb_line); yield();
+    send_to_influxdb_sensors(influxdb_line); yield();
 
     //report WiFi RSSI
     build_influxdb_line(
@@ -161,17 +188,27 @@ void report_to_influxdb(Measures m) {
       rssi,
       m.rssi);
     yield();
-    send_to_influxdb(influxdb_line); yield();
+    send_to_influxdb_sensors(influxdb_line); yield();
 }
 
-void send_to_influxdb(char* line) {
-    const char* action = "Send line to InfluxDB";
-    Serial.println(action);
+void send_to_influxdb(char* line, const char* action, int port) {
     Serial.println(line);
-    assert(Udp.beginPacket(influxdb_ip, influxdb_port),action);
+    assert(Udp.beginPacket(influxdb_ip, port),action);
     assert(Udp.write(line),action);
     assert(Udp.endPacket(),action);
     yield();
+}
+
+void send_to_influxdb_sensors(char* line) {
+    const char* action = "Send line to InfluxDB, database 'sensors'";
+    Serial.println(action);
+    send_to_influxdb(line, action, influxdb_sensors_port);
+}
+
+void send_to_influxdb_heartbeat(char* line) {
+    const char* action = "Send line to InfluxDB, database 'heartbeat'";
+    Serial.println(action);
+    send_to_influxdb(line, action, influxdb_heartbeat_port);
 }
 
 void assert(int err, const char* name) {
@@ -208,6 +245,18 @@ void connect_wifi() {
     Serial.println(WiFi.localIP());
 }
 
+void report_heartbeat()
+{
+    build_influxdb_line(
+      influxdb_line,
+      INFLUXDB_LINE_MAX_SIZE,
+      "heartbeat",
+      "heartbeat",
+      1);
+    yield();
+    send_to_influxdb_heartbeat(influxdb_line); yield();
+}
+
 void setup() {
     Serial.begin(115200);
     delay(STANDART_SHORT_DELAY);
@@ -225,6 +274,9 @@ void setup() {
     char error[] = "Initialize BMP180";
     assert(bmp.begin(),error); yield();
 
+    //Resolve InfluxDB address
+    resolve_influxdb_address(); yield();
+
     //After-setup delay
     delay(STANDART_SHORT_DELAY);
 }
@@ -236,10 +288,13 @@ void loop() {
     delay(STANDART_SHORT_DELAY);
 
     report_to_influxdb(m); yield();
+    report_heartbeat(); yield();
 
     loop_num++;
-    if (loop_num >= REBOOT_LOOPS)
+    if ( loop_num >= REBOOT_LOOPS )
         reboot_module();
+    if ( loop_num % RE_RESOLVE_LOOPS == 0)
+        resolve_influxdb_address();
 
     Serial.print("wait...\n");
     delay(LOOP_DELAY_MS);
