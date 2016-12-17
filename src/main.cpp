@@ -1,15 +1,15 @@
-
 #include "main.h"
 #include "private.h"
 
 ESP8266WiFiMulti WiFiMulti;
-WiFiUDP Udp;
+WiFiClient espClient;
+PubSubClient mqtt(espClient);
 DHT dht(DHTPIN, DHTTYPE, 11);
 Adafruit_BMP085 bmp;
 uint loop_num = 0;
 uint32_t ESP_CHIP_ID = ESP.getChipId();
-
-char influxdb_line [INFLUXDB_LINE_MAX_SIZE];
+char mqtt_message_body[MQTT_MESSAGE_MAX_SIZE];
+const char* mqtt_message_template="{device:ESP8266,temperature:%s}";
 
 void module_panic(const char* message) {
     const char panic[] = "Panic, action failed:";
@@ -50,128 +50,6 @@ void print_measures(Measures m) {
     Serial.println(m.bmp180_temperature);
     Serial.print("RSSI: ");
     Serial.println(m.rssi);
-}
-
-int build_influxdb_line(char* buffer, size_t len, const char* sensor, const char* measure, char* value) {
-    int result = snprintf(
-        buffer,
-        len,
-        "%s,platform=esp8266,device=espmeteo,id=%X,sensor=%s value=%s",
-        measure,
-        ESP_CHIP_ID,
-        sensor,
-        value
-    );
-    yield();
-
-    return result;
-}
-
-int build_influxdb_line(char* buffer, size_t len, const char* sensor, const char* measure, float value) {
-    char value_chars [FLOAT_MAX_CHARS];
-
-    dtostrf(value,5,2,value_chars); yield();
-
-    int result = build_influxdb_line(
-        buffer,
-        len,
-        sensor,
-        measure,
-        value_chars
-    );
-    yield();
-
-    return result;
-}
-
-int build_influxdb_line(char* buffer, size_t len, const char* sensor, const char* measure, int value) {
-    char value_chars [INT_MAX_CHARS];
-
-    const char error[] = "Error converting int to char* in build_influxdb_line";
-    int bytes = snprintf(value_chars,FLOAT_MAX_CHARS,"%d",value);
-    if (bytes <= 0)
-        module_panic(error);
-
-    int result = build_influxdb_line(
-        buffer,
-        len,
-        sensor,
-        measure,
-        value_chars
-    );
-    yield();
-
-    return result;
-}
-
-void report_to_influxdb(Measures m) {
-    const char temperature[] = "temperature";
-    const char humidity[] = "humidity";
-    const char pressure[] = "pressure";
-    const char rssi[] = "rssi";
-    const char dht22_name[] = "dht22";
-    const char bmp180_name[] = "bmp180";
-    const char esp8266_name[] = "esp8266";
-
-    //report DHT22 temperature
-    build_influxdb_line(
-      influxdb_line,
-      INFLUXDB_LINE_MAX_SIZE,
-      dht22_name,
-      temperature,
-      m.dht22_temperature);
-    yield();
-    send_to_influxdb(influxdb_line); yield();
-
-    //report DHT22 humidity
-    build_influxdb_line(
-      influxdb_line,
-      INFLUXDB_LINE_MAX_SIZE,
-      dht22_name,
-      humidity,
-      m.dht22_humidity);
-    yield();
-    send_to_influxdb(influxdb_line); yield();
-
-    //report BMP180 temperature
-    build_influxdb_line(
-      influxdb_line,
-      INFLUXDB_LINE_MAX_SIZE,
-      bmp180_name,
-      temperature,
-      m.bmp180_temperature);
-    yield();
-    send_to_influxdb(influxdb_line); yield();
-
-    //report BMP180 pressure
-    build_influxdb_line(
-      influxdb_line,
-      INFLUXDB_LINE_MAX_SIZE,
-      bmp180_name,
-      pressure,
-      m.bmp180_pressure);
-    yield();
-    send_to_influxdb(influxdb_line); yield();
-
-    //report WiFi RSSI
-    build_influxdb_line(
-      influxdb_line,
-      INFLUXDB_LINE_MAX_SIZE,
-      esp8266_name,
-      rssi,
-      m.rssi);
-    yield();
-    send_to_influxdb(influxdb_line); yield();
-}
-
-void send_to_influxdb(char* line) {
-    const char* action = "Send line to InfluxDB";
-    Serial.println(action);
-    Serial.println(line);
-    assert(Udp.beginPacket(influxdb_ip, influxdb_port),action);
-    assert(Udp.write(line),action);
-    assert(Udp.endPacket(),action);
-    yield();
 }
 
 void assert(int err, const char* name) {
@@ -225,8 +103,27 @@ void setup() {
     char error[] = "Initialize BMP180";
     assert(bmp.begin(),error); yield();
 
+    //Init MQTT client
+    mqtt.setServer(mqtt_server, mqtt_port);
+    reconnect_mqtt(); yield();
+
     //After-setup delay
     delay(STANDART_SHORT_DELAY);
+}
+
+void reconnect_mqtt() {
+  while (!mqtt.connected()) {
+    Serial.print("Attempting MQTT connection...");
+
+    if (mqtt.connect("ESP8266Client")) {
+      Serial.println("MQTT connected");
+    } else {
+      Serial.print("MQTT connection failed, rc=");
+      Serial.print(mqtt.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
 }
 
 void loop() {
@@ -235,11 +132,14 @@ void loop() {
     print_measures(m);
     delay(STANDART_SHORT_DELAY);
 
-    report_to_influxdb(m); yield();
-
     loop_num++;
     if (loop_num >= REBOOT_LOOPS)
         reboot_module();
+
+    if (!mqtt.connected()) {
+      reconnect_mqtt();
+    }
+    mqtt.loop();
 
     Serial.print("wait...\n");
     delay(LOOP_DELAY_MS);
